@@ -1,0 +1,18 @@
+{
+  "name": "convo-notify",
+  "version": "1.0.0",
+  "description": "Convo push notification server",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "express": "^5.2.1",
+    "firebase-admin": "^13.7.0"
+  }
+}
+
