@@ -2,10 +2,8 @@ const express = require("express");
 const admin = require("firebase-admin");
 
 // ── Firebase init ────────────────────────────────────────────────────────────
-const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-
 admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
+  credential: admin.credential.cert('/etc/secrets/service-account.json'),
 });
 
 const db  = admin.firestore();
@@ -27,7 +25,6 @@ async function sendNotification(token, title, body, data = {}) {
         priority: "high",
         notification: {
           sound: "default",
-          channelId: "convo_messages",
           priority: "max",
           visibility: "public",
         },
