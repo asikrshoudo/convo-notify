@@ -16,8 +16,21 @@ app.use(express.json());
 // ── Health check ─────────────────────────────────────────────────────────────
 app.get("/", (req, res) => res.send("Convo Notify Server Running ✅"));
 
-// ── Helper: send FCM notification ────────────────────────────────────────────
+// ── Helper: send FCM + save to Firestore ─────────────────────────────────────
 async function sendNotification(token, title, body, data = {}) {
+  // Always save to Firestore regardless of online status
+  if (data.toUid) {
+    await db.collection("notifications").add({
+      uid:       data.toUid,
+      title,
+      body,
+      type:      data.type || "general",
+      data,
+      read:      false,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    }).catch(() => {});
+  }
+
   if (!token) return;
   try {
     await fcm.send({
@@ -57,15 +70,16 @@ app.post("/notify/dm", async (req, res) => {
       db.collection("users").doc(receiverId).get(),
     ]);
 
-    const senderName    = senderDoc.data()?.name || "Someone";
-    const receiverToken = receiverDoc.data()?.fcmToken;
+    const senderName     = senderDoc.data()?.name || "Someone";
+    const receiverToken  = receiverDoc.data()?.fcmToken;
     const receiverOnline = receiverDoc.data()?.isOnline === true;
 
-    if (receiverOnline) return res.json({ skipped: "User is online" });
-
-    await sendNotification(receiverToken, senderName, text || "New message", {
-      type: "dm", chatId, senderId, senderName,
-    });
+    await sendNotification(
+      receiverOnline ? null : receiverToken,
+      senderName,
+      text || "New message",
+      { type: "dm", chatId, senderId, senderName, toUid: receiverId }
+    );
 
     res.json({ success: true });
   } catch (e) {
@@ -91,10 +105,12 @@ app.post("/notify/group", async (req, res) => {
       const userDoc = await db.collection("users").doc(uid).get();
       const token   = userDoc.data()?.fcmToken;
       const online  = userDoc.data()?.isOnline === true;
-      if (online || !token) return;
-      return sendNotification(token, groupName, `${senderName}: ${text}`, {
-        type: "group", groupId, senderId, senderName,
-      });
+      return sendNotification(
+        online ? null : token,
+        groupName,
+        `${senderName}: ${text}`,
+        { type: "group", groupId, senderId, senderName, toUid: uid }
+      );
     }));
 
     res.json({ success: true });
@@ -110,17 +126,15 @@ app.post("/notify/friend-request", async (req, res) => {
     const { fromUid, fromName, toUid } = req.body;
     if (!fromUid || !toUid) return res.status(400).json({ error: "Missing fields" });
 
-    const receiverDoc  = await db.collection("users").doc(toUid).get();
-    const receiverToken = receiverDoc.data()?.fcmToken;
+    const receiverDoc    = await db.collection("users").doc(toUid).get();
+    const receiverToken  = receiverDoc.data()?.fcmToken;
     const receiverOnline = receiverDoc.data()?.isOnline === true;
 
-    if (receiverOnline) return res.json({ skipped: "User is online" });
-
     await sendNotification(
-      receiverToken,
-      "New Friend Request",
+      receiverOnline ? null : receiverToken,
+      "New Friend Request 👋",
       `${fromName} sent you a friend request`,
-      { type: "friend_request", fromUid }
+      { type: "friend_request", fromUid, toUid }
     );
 
     res.json({ success: true });
@@ -132,20 +146,41 @@ app.post("/notify/friend-request", async (req, res) => {
 // ── API: Friend Request Accepted notification ─────────────────────────────────
 app.post("/notify/friend-accepted", async (req, res) => {
   try {
-    const { fromUid, accepterName } = req.body;
+    const { fromUid, accepterName, accepterUid } = req.body;
     if (!fromUid) return res.status(400).json({ error: "Missing fields" });
 
-    const senderDoc  = await db.collection("users").doc(fromUid).get();
-    const senderToken = senderDoc.data()?.fcmToken;
+    const senderDoc    = await db.collection("users").doc(fromUid).get();
+    const senderToken  = senderDoc.data()?.fcmToken;
     const senderOnline = senderDoc.data()?.isOnline === true;
 
-    if (senderOnline) return res.json({ skipped: "User is online" });
-
     await sendNotification(
-      senderToken,
+      senderOnline ? null : senderToken,
       "Friend Request Accepted! 🎉",
       `${accepterName} accepted your friend request`,
-      { type: "friend_accepted" }
+      { type: "friend_accepted", accepterUid: accepterUid || "", toUid: fromUid }
+    );
+
+    res.json({ success: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── API: Follow notification ──────────────────────────────────────────────────
+app.post("/notify/follow", async (req, res) => {
+  try {
+    const { fromUid, fromName, toUid } = req.body;
+    if (!fromUid || !toUid) return res.status(400).json({ error: "Missing fields" });
+
+    const receiverDoc    = await db.collection("users").doc(toUid).get();
+    const receiverToken  = receiverDoc.data()?.fcmToken;
+    const receiverOnline = receiverDoc.data()?.isOnline === true;
+
+    await sendNotification(
+      receiverOnline ? null : receiverToken,
+      "New Follower ✨",
+      `${fromName} started following you`,
+      { type: "follow", fromUid, toUid }
     );
 
     res.json({ success: true });
